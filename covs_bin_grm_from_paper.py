@@ -1,71 +1,92 @@
-import sys
 import numpy as np
-import pandas as pd 
+import pandas as pd
+from pandas_plink import read_grm
+import matplotlib.pyplot as plt 
 
 def read_phenotype_file(file_path):
     # Read the phenotype file
-    data = pd.read_csv(file_path, sep="\t", header=None).dropna().values
-    print(data) 
-    sample_ids = data[:, 0]  # First column: Sample IDs
-    phenotypes = data[:, 1]  # Second column: Phenotype values
+    data = pd.read_csv(file_path, delim_whitespace=True, header=None)
+    sample_ids = data.iloc[:, 0].values  # First column: Sample IDs
+    phenotypes = data.iloc[:, 1].values  # Second column: Phenotype values
     
     # Handle missing phenotypes (assume missing values are represented by NaN)
     na = ~np.isnan(phenotypes)  # True if phenotype is present, False if missing
     
     return sample_ids, phenotypes, na
 
-def calculate_covariance(fileNameGRM, sample_ids, phenotypes, na, bins):
+
+def read_grm_file(prefix, sample_ids): 
+
+    grm = read_grm(f"{prefix}.grm.bin", f"{prefix}.grm.id")
+    grm_df = pd.DataFrame(grm[0].values)
+    grm_df.index = sample_ids 
+    grm_df.columns = sample_ids
+
+    return grm_df
+
+
+def calculate_covariance(grm_df, sample_ids, phenotypes, na, bins):
     # Initialize variables
     covarianceN = np.zeros(len(bins) - 1)
     covariance = np.zeros(len(bins) - 1)
     avgBins = np.zeros(len(bins) - 1)
 
-    # Read binary GRM file
-    with open(fileNameGRM + ".grm.bin", "rb") as grm_bin:
-        n = len(sample_ids)
-        for i in range(1, n + 1):
-            if not na[i - 1]:
+    # Iterate over pairs of samples
+    for i in range(len(sample_ids)):
+        if not na[i]:
+            continue
+
+        for j in range(i):
+            if not na[j]:
                 continue
 
-            i2 = 0.5 * i
-            if i % 2 == 0:
-                i2 *= (i - 1)
-            else:
-                i2 *= i
+            # Get the GRM value for the (i, j) pair
+            tmp = grm_df.loc[sample_ids[i], sample_ids[j]]
 
-            for j in range(1, i):
-                if not na[j - 1]:
-                    continue
-
-                cell = int(i2 + j)
-                m = 4 * (cell - 1)
-
-                # Read the value from the binary file
-                grm_bin.seek(m)
-                tmp = np.frombuffer(grm_bin.read(4), dtype=np.float32)[0]
-
-                k = 20 if tmp > 0 else 0
-                while k < len(bins) - 1:
-                    if tmp < bins[k + 1]:
-                        covarianceN[k] += 1.0
-                        covariance[k] += phenotypes[i - 1] * phenotypes[j - 1]
-                        avgBins[k] += tmp
-                        break
-                    k += 1
-
-    print('...a total of', np.sum(covarianceN), 'comparisons')
+            # Start k at 0 to find the correct bin
+            k = 0
+            while k < len(bins) - 1:
+                if tmp < bins[k + 1]:
+                    covarianceN[k] += 1.0
+                    covariance[k] += phenotypes[i] * phenotypes[j]
+                    avgBins[k] += tmp
+                    break
+                k += 1
 
     return covarianceN, covariance, avgBins
 
+def plot_average_covariance(bins, covariance, covarianceN, output_file):
+    # Calculate average covariance per bin
+    average_covariance = np.divide(covariance, covarianceN, where=covarianceN != 0)
 
-phenotype_file = "bmi_sample.txt"
-sample_ids, phenotypes, na = read_phenotype_file(phenotype_file)
+    # Plot the average covariance for each bin
+    mid_bins = 0.5 * (bins[:-1] + bins[1:])  # Midpoints of each bin for plotting
 
-fileNameGRM = "grm/european_irish_sample"  # Base name for the .grm.bin file
+    plt.figure(figsize=(10, 6))
+    plt.scatter(mid_bins, average_covariance, edgecolor="black", alpha=0.7)
+    plt.xlabel("GRM Value Bins")
+    plt.ylabel("Average Phenotypic Covariance")
+    plt.title("Average Phenotypic Covariance Across GRM Value Bins")
+    plt.savefig(output_file, format='png', dpi=300)
+    plt.show()
 
-bins = np.linspace(0, 1, 21)  # Example bin edges, e.g., 20 bins between 0 and 1
 
-covarianceN, covariance, avgBins = calculate_covariance(fileNameGRM, sample_ids, phenotypes, na, bins)
-print(covariance)
-# grm = read_grm("grm/european_irish_sample.grm.bin", "grm/european_irish_sample.grm.id")
- 
+if __name__ == "__main__": 
+
+    phenotype_file = "bmi_sample.txt"
+    sample_ids, phenotypes, na = read_phenotype_file(phenotype_file)
+
+    # Read GRM data using pandas-plink
+    grm_prefix = "grm/european_irish_sample"  # Prefix of the GRM files (e.g., "example_grm.grm.bin")
+    grm_df = read_grm_file(grm_prefix, sample_ids)
+
+    output_file = "irish_test.png"
+
+    bins = np.linspace(0, 1, 21)  # Example bin edges, e.g., 20 bins between 0 and 1
+
+    covarianceN, covariance, avgBins = calculate_covariance(grm_df, sample_ids, phenotypes, na, bins)
+    print(covarianceN)
+    print(covariance)
+    print(avgBins)
+    print(bins)
+    # plot_average_covariance(bins, covariance, covarianceN, output_file)

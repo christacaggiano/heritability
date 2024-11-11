@@ -1,8 +1,8 @@
-#!/bin/bash
+l#!/bin/bash
 
 #BSUB -P acc_kennylab
 #BSUB -n 10
-#BSUB -W 42:00
+#BSUB -W 8:00
 #BSUB -q premium
 #BSUB -R span[hosts=1] 
 #BSUB -R rusage[mem=2000]
@@ -16,7 +16,7 @@ conda activate saige
 chr=$LSB_JOBINDEX 
 
 genotyping_data="../../data/biome/geno/gght_v2_topmed_allchr"
-pop="european_irish_sample" 
+pop="european_all" 
 
 ../plink2 \
     --bfile $genotyping_data \
